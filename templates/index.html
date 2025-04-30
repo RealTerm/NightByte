@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>YouTube Downloader Pro</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+  <style>
+    :root {
+      --bg-dark: #0a0a0a;
+      --bg-secondary: #1a1a1a;
+      --accent: #00cc88;
+      --text-light: #ffffff;
+    }
+
+    body {
+      background: var(--bg-dark);
+      color: var(--text-light);
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    .video-card {
+      background: var(--bg-secondary);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin: 1rem 0;
+      transition: all 0.3s ease;
+      opacity: 0;
+      transform: translateY(20px);
+    }
+
+    .visible {
+      opacity: 1 !important;
+      transform: translateY(0) !important;
+    }
+
+    .thumbnail {
+      width: 100%;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+    }
+
+    .progress {
+      height: 8px;
+      background: #333;
+      border-radius: 4px;
+    }
+
+    .btn-download {
+      background-color: var(--accent);
+      color: black;
+      font-weight: bold;
+    }
+
+    #urlInput.loading {
+      background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2300cc88"><path d="M12 2a1 1 0 0 1 1 1v3a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1zm0 15a1 1 0 0 1 1 1v3a1 1 0 1 1-2 0v-3a1 1 0 0 1 1-1zm10-5h-3a1 1 0 1 1 0-2h3a1 1 0 1 1 0 2zM7 12a1 1 0 0 1-1 1H3a1 1 0 1 1 0-2h3a1 1 0 0 1 1 1zm12.95-4.535a1 1 0 0 1-1.414 1.414l-2.12-2.121a1 1 0 0 1 1.414-1.414l2.12 2.121zM5.636 16.949a1 1 0 0 1-1.414 1.414l-2.12-2.121a1 1 0 1 1 1.414-1.414l2.12 2.121zm14.142 0a1 1 0 0 1 1.414 1.414l-2.12 2.121a1 1 0 0 1-1.414-1.414l2.12-2.121zM5.636 7.05a1 1 0 0 1 1.414-1.414l2.12 2.12a1 1 0 1 1-1.414 1.415l-2.12-2.121z"/></svg>') no-repeat right 0.75rem center/20px 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container py-4">
+    <h1 class="text-center mb-4" style="color: var(--accent);">
+      <i class="fas fa-download"></i> YouTube Downloader Pro
+    </h1>
+
+    <div class="input-group mb-4">
+      <input type="url" id="urlInput" class="form-control" placeholder="Paste YouTube URL here" />
+      <button class="btn btn-primary" onclick="handlePaste()">
+        <i class="fas fa-paste"></i> Paste
+      </button>
+    </div>
+
+    <div id="videoInfo" class="video-card">
+      <img id="videoThumbnail" class="thumbnail" onerror="this.src='https://via.placeholder.com/1280x720?text=No+Thumbnail'" />
+      <h3 id="videoTitle"></h3>
+      <p id="videoDuration"></p>
+
+      <div class="mb-3">
+        <h5>Select Format:</h5>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <select id="formatType" class="form-select bg-dark text-light" onchange="updateFormatOptions()">
+              <option value="video" selected>Video (MP4)</option>
+              <option value="audio">Audio (MP3)</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <select id="formatQuality" class="form-select bg-dark text-light"></select>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-download mt-3" onclick="startDownload()">
+        <i class="fas fa-download"></i> Download
+      </button>
+
+      <div class="progress mt-3">
+        <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+      </div>
+      <p id="statusText" class="mt-2 mb-0"></p>
+    </div>
+
+    <div id="downloadHistory" class="mt-4">
+      <h4>Download History</h4>
+      <div id="historyList" class="list-group"></div>
+    </div>
+  </div>
+
+  <script>
+    let currentJobId = null;
+    let debounceTimer = null;
+    let currentFormats = null;
+
+    document.getElementById('urlInput').addEventListener('input', function(e) {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        if (e.target.value.trim().length > 10) getVideoInfo();
+        else hideVideoInfo();
+      }, 500);
+    });
+
+    async function handlePaste() {
+      try {
+        const text = await navigator.clipboard.readText();
+        document.getElementById('urlInput').value = text;
+        getVideoInfo();
+      } catch {
+        alert('Use Ctrl+V to paste');
+      }
+    }
+
+    async function getVideoInfo() {
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) return;
+      showLoadingState();
+      try {
+        const response = await fetch('/get_info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const data = await response.json();
+        currentFormats = data.formats;
+        showVideoInfo(data);
+        updateFormatOptions();
+        showDownloadHistory();
+      } catch (err) {
+        showError(err.message || 'Failed to get video info');
+        hideVideoInfo();
+      }
+    }
+
+    function showLoadingState() {
+      document.getElementById('videoInfo').classList.remove('visible');
+      document.getElementById('urlInput').classList.add('loading');
+    }
+
+    function showVideoInfo(data) {
+      document.getElementById('videoThumbnail').src = data.thumbnail;
+      document.getElementById('videoTitle').textContent = data.title;
+      document.getElementById('videoDuration').textContent = `Duration: ${formatDuration(data.duration)}`;
+      document.getElementById('urlInput').classList.remove('loading');
+      document.getElementById('videoInfo').classList.add('visible');
+    }
+
+    function hideVideoInfo() {
+      document.getElementById('videoInfo').classList.remove('visible');
+      document.getElementById('urlInput').classList.remove('loading');
+    }
+
+    function updateFormatOptions() {
+      const type = document.getElementById('formatType').value;
+      const qualitySelect = document.getElementById('formatQuality');
+      qualitySelect.innerHTML = '';
+      const seen = new Set();
+
+      if (currentFormats?.[type]) {
+        currentFormats[type].forEach(format => {
+          const key = type === 'video' ? `${format.height}-${format.ext}` : `${format.bitrate}-${format.ext}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+
+          const option = document.createElement('option');
+          option.value = format.id;
+          option.textContent = type === 'video'
+            ? `${format.height}p (.${format.ext})`
+            : `${Math.round(format.bitrate)}kbps (.${format.ext})`;
+          qualitySelect.appendChild(option);
+        });
+      }
+    }
+
+    async function startDownload() {
+      const formatType = document.getElementById('formatType').value;
+      const formatId = document.getElementById('formatQuality').value;
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) return;
+
+      const payload = {
+        url,
+        title: document.getElementById('videoTitle').textContent,
+        thumbnail: document.getElementById('videoThumbnail').src,
+        duration: parseInt(document.getElementById('videoDuration').textContent.split(' ')[1]),
+        format_type: formatType,
+        format_id: formatId
+      };
+
+      try {
+        const response = await fetch('/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const data = await response.json();
+        currentJobId = data.job_id;
+        trackProgress();
+      } catch (err) {
+        showError(err.message || 'Download failed');
+      }
+    }
+
+    function trackProgress() {
+      const progressBar = document.getElementById('progressBar');
+      const statusText = document.getElementById('statusText');
+      const interval = setInterval(async () => {
+        try {
+          const response = await fetch('/status');
+          const status = await response.json();
+          const job = status.current || status.queue.find(j => j.id === currentJobId);
+          if (!job) return;
+
+          const percent = Math.floor(job.progress * 100);
+          progressBar.style.width = `${percent}%`;
+          statusText.textContent = `${job.status} (${percent}%) - ${job.title}`;
+
+          if (job.status === 'complete') {
+            clearInterval(interval);
+            progressBar.style.width = '100%';
+            statusText.textContent = 'Download complete!';
+            currentJobId = null;
+            setTimeout(() => {
+              progressBar.style.width = '0%';
+              statusText.textContent = '';
+            }, 3000);
+            showDownloadHistory();
+          }
+
+          if (job.status?.startsWith('error:')) {
+            clearInterval(interval);
+            showError(job.status.replace('error:', ''));
+          }
+        } catch (err) {
+          console.error('Progress check failed:', err);
+        }
+      }, 1000);
+    }
+
+    async function showDownloadHistory() {
+      try {
+        const response = await fetch('/downloads');
+        const data = await response.json();
+        const container = document.getElementById('historyList');
+        container.innerHTML = data.history.map(file => `
+          <div class="list-group-item bg-secondary mb-2 d-flex justify-content-between align-items-center">
+            <div>
+              <strong>${file.title}</strong><br/>
+              <small>${file.filename}</small>
+            </div>
+            <button class="btn btn-sm btn-outline-light" onclick="window.open('/download_file/${file.filename}', '_blank')">
+              Download
+            </button>
+          </div>
+        `).join('');
+      } catch (err) {
+        console.error('History error:', err);
+      }
+    }
+
+    function formatDuration(seconds) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = Math.floor(seconds % 60);
+      return [h, m, s].map(v => v.toString().padStart(2, '0')).join(':');
+    }
+
+    function showError(msg) {
+      const el = document.createElement('div');
+      el.className = 'alert alert-danger position-fixed top-0 end-0 m-3';
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 5000);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      showDownloadHistory();
+    });
+  </script>
+</body>
+</html>
